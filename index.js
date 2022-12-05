@@ -25,6 +25,8 @@ const client = new MongoClient(uri, {
 const run = async () => {
   const BooksCollection = client.db("TheStoryKeeper").collection("Books");
   const OrderCollection = client.db("TheStoryKeeper").collection("Orders");
+  const UsersCollection = client.db("TheStoryKeeper").collection("Users");
+  
 
   try {
     // Get some category book to display home page
@@ -111,6 +113,15 @@ const run = async () => {
         res.send(result);
     })
 
+    //  Store User data
+    app.post('/users', async(req, res) =>{
+        const user = req.body.newUser;
+        const result = await UsersCollection.insertOne(user);
+
+        res.send(result);
+    })
+
+    
 
   } catch {}
 };
