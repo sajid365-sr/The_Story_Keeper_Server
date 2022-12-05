@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 5000;
 require("dotenv").config();
@@ -24,6 +24,7 @@ const client = new MongoClient(uri, {
 
 const run = async () => {
   const BooksCollection = client.db("TheStoryKeeper").collection("Books");
+  const OrderCollection = client.db("TheStoryKeeper").collection("Orders");
 
   try {
     // Get some category book to display home page
@@ -91,6 +92,26 @@ const run = async () => {
 
       res.send(sliceFilteredBook);
     });
+
+    // Get specific book details by book id
+    app.get('/book/:id' , async(req, res) => {
+        const id = req.params.id;
+        const query = { _id:ObjectId(id) };
+        const result = await BooksCollection.findOne(query);
+
+        res.send(result);
+    })
+
+
+    // Order a book
+    app.post('/orders', async(req, res) => {
+        const orderData = req.body.order;
+        const result = await OrderCollection.insertOne(orderData);
+
+        res.send(result);
+    })
+
+
   } catch {}
 };
 
