@@ -1,9 +1,11 @@
 const express = require("express");
 const cors = require("cors");
+const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 5000;
 require("dotenv").config();
+
 
 // Middleware
 app.use(cors());
@@ -29,6 +31,30 @@ const run = async () => {
   
 
   try {
+
+    // Assign JW Token
+    
+    app.get('/jwt', async(req, res) =>{
+        const email = req.query.email;
+        const state = req.query.state;
+        
+        const query = {email:email};
+        const user = await UsersCollection.findOne(query);
+
+        if(user || state){
+            const token = jwt.sign({email}, process.env.JWT, {expiresIn:'1h'});
+            
+             return res.send({accessToken:token});
+         }
+        
+         res.status(403).send({accessToken: ''})
+
+    })
+
+
+
+
+
     // Get some category book to display home page
     app.get("/books", async (req, res) => {
         const result = await BooksCollection.find({}).toArray();
