@@ -147,6 +147,33 @@ const run = async () => {
         res.send(result);
     })
 
+    // verify seller/buyer or admin
+    app.get('/users/type', async(req, res) =>{
+        const email = req.query.email;
+        const query = {email:email};
+        const result = await UsersCollection.findOne(query);
+        const userType = result.type;
+        
+        res.send({userType});
+    })
+
+    // Get buyer orders
+    app.get('/myOrders', async(req, res) =>{
+        const email = req.query.email;
+        const query = {email:email};
+        const result = await OrderCollection.find(query).toArray();
+
+        res.send(result);
+    })
+
+
+    // Add a new product(book) => seller route
+    app.post('/books', async(req, res) =>{
+        const book = req.body.book;
+        const result = await BooksCollection.insertOne(book);
+
+        res.send(result);
+    })
     
 
   } catch {}
