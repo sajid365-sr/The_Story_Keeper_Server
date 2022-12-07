@@ -153,8 +153,12 @@ const run = async () => {
       const query = { email: email };
       const result = await OrderCollection.find(query).toArray();
 
+      
       res.send(result);
     });
+
+   
+
 
     // Add a new product(book) => seller route
     app.post("/books", async (req, res) => {
@@ -177,21 +181,75 @@ const run = async () => {
         if(filteredBooksByName.includes(book.category)){
             const getBook = await BooksCollection.findOne(query);
             const getId = getBook.categoryId;
-            console.log(getId)
+
             book.categoryId = getId;
         }
         else{
             book.categoryId = filteredBooksByName.length + 1;
         }
 
-        console.log(book)
-     
+        
 
       const result = await BooksCollection.insertOne(book);
       res.send(result);
+
     });
 
+// Get seller all products (seller myProducts route)
+app.get("/myProducts", async (req, res) => {
+    const email = req.query.email;
+    const query = { email: email };
+    const result = await BooksCollection.find(query).toArray();
 
+
+    res.send(result);
+  });
+
+
+  // Delete my product (seller route)
+
+app.delete('/myProduct/delete/:id', async(req,res) =>{
+    const id = req.params.id;
+    const query = { _id:ObjectId(id) };
+    const result = await BooksCollection.deleteOne(query);
+    
+    const orders = await OrderCollection.find({productId:id}).toArray();
+    if(orders.length >= 1){
+        orders.forEach(order => {
+            if(order.status !== 'paid'){
+                
+                OrderCollection.deleteOne({productId:id});
+            }
+        })
+        
+    }
+
+    res.send(result);
+})
+
+
+
+
+
+   // Check product status (seller myProducts route)
+//    app.post('/myProducts/status', async(req, res) =>{
+//        const ids = req.body;
+//        const orders = await OrderCollection.find({}).toArray();
+//         const books = await BooksCollection.find({}).toArray();
+//        const filterOrder = [];
+//        ids.forEach(id => {
+//            const filter = orders.filter(order => order.productId === id);
+//            filterOrder.push(filter)
+           
+//         })
+//         const filterBook = [];
+//         books.forEach(book => {
+//             const filter2 = filterOrder.filter(order => order.productId === book._id);
+//             filterBook.push(filter2);
+//         })
+
+//        console.log(filterBook)
+//    })
 
 
   } catch {
