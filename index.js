@@ -87,7 +87,7 @@ const run = async () => {
       res.send(result);
     });
 
-    // Get all books (book route)
+    // Get all books (shop route)
     app.get("/allBooks", async (req, res) => {
       const query = {};
       const result = await BooksCollection.find(query).toArray();
@@ -108,9 +108,9 @@ const run = async () => {
         const bookByCatId = result.filter((book) => book.categoryId === catId);
         filteredBooks.push(bookByCatId);
       });
-      const sliceFilteredBook = filteredBooks.slice(0, 8);
+      
 
-      res.send(sliceFilteredBook);
+      res.send(filteredBooks);
     });
 
     // Get specific book details by book id
@@ -134,10 +134,16 @@ const run = async () => {
           }
       }
        await BooksCollection.updateOne(filter, updateDoc, options);
-    
+        
 
       const findAd =  await AdvertiseItemsCollection.findOne(filter2);
       if(findAd){
+        const updateDoc = {
+          $unset:{
+            advertise:1
+          }
+        }
+        await BooksCollection.updateOne(filter, updateDoc);
         await AdvertiseItemsCollection.deleteOne(filter2);
       }     
 
@@ -177,6 +183,22 @@ const run = async () => {
       res.send(result);
     });
 
+    // Get all categories name
+    app.get('/categories', async(req, res) =>{
+      const allBook = await BooksCollection.find({}).toArray();
+
+      const categoryName = allBook.map(book => book.category);
+      const categories = [];
+      
+      categoryName.forEach((catName) => {
+        if (!categories.includes(catName)) {
+          categories.push(catName);
+        }
+        
+      });
+
+      res.send(categories);
+    })
    
 
 
@@ -184,6 +206,7 @@ const run = async () => {
     app.post("/books", async (req, res) => {
         const allBook = await BooksCollection.find({}).toArray();
         const book = req.body.book;
+        const filter = { email:book.email };
         
         const query = {category : book.category};
       
@@ -208,6 +231,9 @@ const run = async () => {
             book.categoryId = filteredBooksByName.length + 1;
         }
 
+        const findSellerStatus = await UsersCollection.findOne(filter);
+        book.verified = findSellerStatus.verified;
+
         
 
       const result = await BooksCollection.insertOne(book);
@@ -231,9 +257,14 @@ app.get("/myProducts", async (req, res) => {
 app.delete('/myProduct/delete/:id', async(req,res) =>{
     const id = req.params.id;
     const query = { _id:ObjectId(id) };
+    const filter = {_id: id};
     const result = await BooksCollection.deleteOne(query);
     
-
+    const findAd =  await AdvertiseItemsCollection.findOne(filter);
+    if(findAd){
+      await AdvertiseItemsCollection.deleteOne(filter);
+    }   
+    
     res.send(result);
 })
 
@@ -263,6 +294,71 @@ app.get('/advertise', async(req,res) =>{
 
     
     res.send(result);
+})
+
+// Get all seller (Admin all seller route)
+app.get('/allSeller', async(req, res) =>{
+  const query = { type:"seller" };
+  const result = await UsersCollection.find(query).toArray();
+
+  res.send(result);
+})
+
+// Get all buyer (Admin all buyer route)
+app.get('/allBuyer', async(req, res) =>{
+  const query = { type:"buyer" };
+  const result = await UsersCollection.find(query).toArray();
+
+  res.send(result);
+})
+
+// Delete buyer (Admin all buyer route)
+app.get('/delete/buyer', async(req,res)=>{
+  const email = req.query.email;
+  const query = {email:email};
+
+  const findBuyerOrder = await OrderCollection.find(query).toArray(); // Check if the buyer has any orders
+
+  if(findBuyerOrder){
+
+    findBuyerOrder.forEach(orders =>{
+      if(orders.status === 'pending'){ // If orders, then check if they are pending or paid, if pending then before delete, change their status from pending to available from book collection ;
+
+        const filter = {_id:ObjectId(orders.productId)}; // check orders
+        const options = { upsert:true };
+        const updateDoc = {
+          $set:{
+            status:'available'
+          }
+        }
+         BooksCollection.updateOne(filter, updateDoc, options); // updating deleted items status from pending to available inside book collection.
+      }
+
+      
+
+    })
+
+    await OrderCollection.deleteMany(query); // Delete buyers unpaid/pending orders
+  }
+  const result = await UsersCollection.deleteOne(query); // Finally delete buyer from users collections.
+
+  res.send(result);
+
+})
+
+// Verify seller (Admin all seller route)
+app.get('/seller/verify', async(req, res) =>{
+  const email = req.query.email;
+  const filter = { email:email };
+  const options = { upsert:true };
+  const updateDoc = {
+    $set:{
+      verified: true
+    }
+  }
+  const result = await UsersCollection.updateOne(filter, updateDoc, options);
+
+  res.send(result);
 })
 
 
