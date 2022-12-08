@@ -27,6 +27,7 @@ const run = async () => {
   const BooksCollection = client.db("TheStoryKeeper").collection("Books");
   const OrderCollection = client.db("TheStoryKeeper").collection("Orders");
   const UsersCollection = client.db("TheStoryKeeper").collection("Users");
+  const AdvertiseItemsCollection = client.db("TheStoryKeeper").collection("AdvertiseItems");
 
   try {
     // Assign JW Token
@@ -121,13 +122,32 @@ const run = async () => {
       res.send(result);
     });
 
-    // Order a book
+    // Order a book (Buyer booking modal route)
     app.post("/orders", async (req, res) => {
       const orderData = req.body.order;
+      const filter = {_id:ObjectId(orderData.productId)};
+      const filter2 = {_id: orderData.productId};
+      const options = {upsert:true};
+      const updateDoc = {
+          $set:{
+              status:'pending'
+          }
+      }
+       await BooksCollection.updateOne(filter, updateDoc, options);
+    
+
+      const findAd =  await AdvertiseItemsCollection.findOne(filter2);
+      if(findAd){
+        await AdvertiseItemsCollection.deleteOne(filter2);
+      }     
+
       const result = await OrderCollection.insertOne(orderData);
 
       res.send(result);
     });
+
+
+
 
     //  Store User data
     app.post("/users", async (req, res) => {
@@ -213,43 +233,38 @@ app.delete('/myProduct/delete/:id', async(req,res) =>{
     const query = { _id:ObjectId(id) };
     const result = await BooksCollection.deleteOne(query);
     
-    const orders = await OrderCollection.find({productId:id}).toArray();
-    if(orders.length >= 1){
-        orders.forEach(order => {
-            if(order.status !== 'paid'){
-                
-                OrderCollection.deleteOne({productId:id});
-            }
-        })
-        
-    }
 
     res.send(result);
 })
 
+// Add a new item to Advertise
+app.post('/advertise', async(req,res) =>{
+    const item = req.body.product;
+    item.advertise = true;
+    
+    const filter = {_id:ObjectId(item._id)};
+      const options = {upsert:true};
+      const updateDoc = {
+          $set:{
+              advertise:true
+          }
+      }
+       await BooksCollection.updateOne(filter, updateDoc, options);
 
+    const result = await AdvertiseItemsCollection.insertOne(item);
 
+    res.send(result);
+})
 
+// Get advertise items
+app.get('/advertise', async(req,res) =>{
+    const query = {};
+    const result = await AdvertiseItemsCollection.find(query).toArray();
 
-   // Check product status (seller myProducts route)
-//    app.post('/myProducts/status', async(req, res) =>{
-//        const ids = req.body;
-//        const orders = await OrderCollection.find({}).toArray();
-//         const books = await BooksCollection.find({}).toArray();
-//        const filterOrder = [];
-//        ids.forEach(id => {
-//            const filter = orders.filter(order => order.productId === id);
-//            filterOrder.push(filter)
-           
-//         })
-//         const filterBook = [];
-//         books.forEach(book => {
-//             const filter2 = filterOrder.filter(order => order.productId === book._id);
-//             filterBook.push(filter2);
-//         })
+    
+    res.send(result);
+})
 
-//        console.log(filterBook)
-//    })
 
 
   } catch {
