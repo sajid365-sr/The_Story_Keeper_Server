@@ -343,13 +343,47 @@ app.get('/delete/seller', async(req, res) =>{
   const query = {email:email};
   
   const findBook = await BooksCollection.find(query).toArray(); // Check if the seller has any books on books collection
+  if(findBook){ // If books found then delete them form books collections
+    BooksCollection.deleteMany(query);
+  }
+
   const orders = await OrderCollection.find({}).toArray();
 
-  const matchBook = findBook.map( book => book._id);
-  console.log(matchBook)
+  orders.forEach(order =>{
+    const filter = { _id:ObjectId(order.productId)}; // filter to search all orders those are available in books collections. If orders not found in books collection that means that book have been removed from book collection. and the ans will be "null". If null found for any order that means that it the orders that should be removed.
+    const result = async() =>{
+      const result2 = await BooksCollection.findOne(filter);
+      if(result2 === null){
+       OrderCollection.deleteOne({productId:order.productId})
+      }
+    }
+   result()
+  })
+ 
+ const finalResult = await UsersCollection.deleteOne(query);
 
+ res.send(finalResult);
   
  
+})
+
+
+// TEst
+
+app.get('/test', async(req,res) =>{
+
+  const orders = await OrderCollection.find({}).toArray();
+
+  orders.forEach(order =>{
+    const filter = { _id:ObjectId(order.productId)};
+    const result = async() =>{
+      const rslt = await BooksCollection.findOne(filter);
+      if(rslt === null){
+       OrderCollection.deleteOne({productId:order.productId})
+      }
+    }
+   result()
+  })
 })
 
 
@@ -382,8 +416,6 @@ app.get('/delete/buyer',verifyJWT, async(req,res)=>{
         }
          BooksCollection.updateOne(filter, updateDoc, options); // updating deleted items status from pending to available inside book collection.
       }
-
-      
 
     })
 
