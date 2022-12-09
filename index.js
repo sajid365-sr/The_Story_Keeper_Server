@@ -10,6 +10,26 @@ require("dotenv").config();
 app.use(cors());
 app.use(express.json());
 
+
+// Custom middleware to verify jwt
+const verifyJWT = (req, res, next) =>{
+  const authHeader = req.headers.authorization; // Get headers.authorization from req.header to get token inside
+  if(!authHeader){
+    return res.status(401).send( {message:'Unauthorized Access'}); // if no authHeader found then return with a Unauthorized status
+  }
+  const token = authHeader.split(' ')[1]; // split header to get token, because token is with 'bearer token'
+
+  jwt.verify(token, process.env.JWT, function(err, decode){ // verify jwt
+    if(err){ // if gets error during verify then return with a forbidden status
+      return res.status(403).send( {message: 'Forbidden Access'});
+    }
+    req.decoded = decode; // if pass the verification then set decoded msg inside req
+    next(); // call the next function otherwise it won't pass the next function
+  })
+}
+
+
+
 // Default route
 app.get("/", (req, res) => {
   res.send("Book Keeper server is running");
@@ -163,9 +183,14 @@ const run = async () => {
       res.send(result);
     });
 
-    // verify seller/buyer or admin
-    app.get("/users/type", async (req, res) => {
+    // verify user (Admin/Seller/Buyer)
+    app.get("/users/type", verifyJWT, async (req, res) => {
       const email = req.query.email;
+      const decodedEmail = req.decoded.email
+      if(email !== decodedEmail){
+          return res.status(403).send({message: 'Forbidden Access'});
+      }
+
       const query = { email: email };
       const result = await UsersCollection.findOne(query);
       const userType = result.type;
@@ -173,9 +198,14 @@ const run = async () => {
       res.send({ userType });
     });
 
-    // Get buyer orders
-    app.get("/myOrders", async (req, res) => {
+    // Get buyer orders (buyer my orders route)
+    app.get("/myOrders", verifyJWT, async (req, res) => {
       const email = req.query.email;
+      const decodedEmail = req.decoded.email;
+
+      if(email !== decodedEmail){
+        return res.status(403).send({message: 'Forbidden Access'});
+    }
       const query = { email: email };
       const result = await OrderCollection.find(query).toArray();
 
@@ -242,8 +272,12 @@ const run = async () => {
     });
 
 // Get seller all products (seller myProducts route)
-app.get("/myProducts", async (req, res) => {
+app.get("/myProducts", verifyJWT, async (req, res) => {
     const email = req.query.email;
+    const decodedEmail = req.decoded.email
+      if(email !== decodedEmail){
+          return res.status(403).send({message: 'Forbidden Access'});
+      }
     const query = { email: email };
     const result = await BooksCollection.find(query).toArray();
 
@@ -252,9 +286,8 @@ app.get("/myProducts", async (req, res) => {
   });
 
 
-  // Delete my product (seller route)
-
-app.delete('/myProduct/delete/:id', async(req,res) =>{
+  // Delete my product (seller my product route)
+app.delete('/myProduct/delete/:id', verifyJWT, async(req,res) =>{
     const id = req.params.id;
     const query = { _id:ObjectId(id) };
     const filter = {_id: id};
@@ -288,7 +321,7 @@ app.post('/advertise', async(req,res) =>{
 })
 
 // Get advertise items
-app.get('/advertise', async(req,res) =>{
+app.get('/advertise', verifyJWT, async(req,res) =>{
     const query = {};
     const result = await AdvertiseItemsCollection.find(query).toArray();
 
@@ -297,15 +330,31 @@ app.get('/advertise', async(req,res) =>{
 })
 
 // Get all seller (Admin all seller route)
-app.get('/allSeller', async(req, res) =>{
+app.get('/allSeller', verifyJWT, async(req, res) =>{
   const query = { type:"seller" };
   const result = await UsersCollection.find(query).toArray();
 
   res.send(result);
 })
 
+// Delete seller (Admin all seller route)
+app.get('/delete/seller', async(req, res) =>{
+  const email = req.query.email;
+  const query = {email:email};
+  
+  const findBook = await BooksCollection.find(query).toArray(); // Check if the seller has any books on books collection
+  const orders = await OrderCollection.find({}).toArray();
+
+  const matchBook = findBook.map( book => book._id);
+  console.log(matchBook)
+
+  
+ 
+})
+
+
 // Get all buyer (Admin all buyer route)
-app.get('/allBuyer', async(req, res) =>{
+app.get('/allBuyer', verifyJWT, async(req, res) =>{
   const query = { type:"buyer" };
   const result = await UsersCollection.find(query).toArray();
 
@@ -313,7 +362,7 @@ app.get('/allBuyer', async(req, res) =>{
 })
 
 // Delete buyer (Admin all buyer route)
-app.get('/delete/buyer', async(req,res)=>{
+app.get('/delete/buyer',verifyJWT, async(req,res)=>{
   const email = req.query.email;
   const query = {email:email};
 
@@ -347,7 +396,7 @@ app.get('/delete/buyer', async(req,res)=>{
 })
 
 // Verify seller (Admin all seller route)
-app.get('/seller/verify', async(req, res) =>{
+app.get('/seller/verify',verifyJWT, async(req, res) =>{
   const email = req.query.email;
   const filter = { email:email };
   const options = { upsert:true };
