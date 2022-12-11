@@ -54,6 +54,8 @@ const run = async () => {
   const UsersCollection = client.db("TheStoryKeeper").collection("Users");
   const AdvertiseItemsCollection = client.db("TheStoryKeeper").collection("AdvertiseItems");
   const WishListCollection = client.db('TheStoryKeeper').collection('wishList');
+  const PaymentsCollection = client.db("TheStoryKeeper").collection("payments");
+
 
   try {
     // Assign JW Token
@@ -558,6 +560,14 @@ app.get('/payment/status/:id', async(req, res) =>{
   }
 
   
+})
+
+// Save payment data to db
+app.post('/payments', async(req, res) =>{
+  const payment = req.body;
+  const result = await PaymentsCollection.insertOne(payment);
+
+  res.send(result);
 })
 
 
