@@ -2,9 +2,12 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-const app = express();
 const port = process.env.PORT || 5000;
 require("dotenv").config();
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+
+const app = express();
 
 // Middleware
 app.use(cors());
@@ -44,10 +47,13 @@ const client = new MongoClient(uri, {
 });
 
 const run = async () => {
+  
+  // Collections
   const BooksCollection = client.db("TheStoryKeeper").collection("Books");
   const OrderCollection = client.db("TheStoryKeeper").collection("Orders");
   const UsersCollection = client.db("TheStoryKeeper").collection("Users");
   const AdvertiseItemsCollection = client.db("TheStoryKeeper").collection("AdvertiseItems");
+  const WishListCollection = client.db('TheStoryKeeper').collection('wishList');
 
   try {
     // Assign JW Token
@@ -213,6 +219,23 @@ const run = async () => {
       res.send(result);
     });
 
+    // Add a new item to wishlist(Buyer My WishList route)
+    app.post('/wishList', async(req, res) =>{
+      const book = req.body;
+      const result = await WishListCollection.insertOne(book);
+
+      res.send(result);
+    })
+
+    // Get wishList Item (Buyer My WishList route)
+    app.get('/wishList', async(req, res) =>{
+      const email = req.query.email;
+      const query = { email:email };
+      const result = await WishListCollection.find(query).toArray();
+
+      res.send(result);
+    })
+
     // Get all categories name
     app.get('/categories', async(req, res) =>{
       const allBook = await BooksCollection.find({}).toArray();
@@ -368,24 +391,6 @@ app.get('/delete/seller', async(req, res) =>{
 })
 
 
-// TEst
-
-app.get('/test', async(req,res) =>{
-
-  const orders = await OrderCollection.find({}).toArray();
-
-  orders.forEach(order =>{
-    const filter = { _id:ObjectId(order.productId)};
-    const result = async() =>{
-      const rslt = await BooksCollection.findOne(filter);
-      if(rslt === null){
-       OrderCollection.deleteOne({productId:order.productId})
-      }
-    }
-   result()
-  })
-})
-
 
 // Get all buyer (Admin all buyer route)
 app.get('/allBuyer', verifyJWT, async(req, res) =>{
@@ -441,6 +446,122 @@ app.get('/seller/verify',verifyJWT, async(req, res) =>{
 
   res.send(result);
 })
+
+
+//  ================================== (Stripe Payment system) =================================
+//(Buyer payment route)
+
+app.get('/payment/:id', async(req, res) =>{
+  const id = req.params.id;
+  const query = { _id:ObjectId(id) };
+  const result = await OrderCollection.findOne(query);
+
+  res.send(result);
+})
+
+// Payment from WishList (Buyer wishlist route)
+app.get('/payment2/:id', async(req, res) =>{
+  const id = req.params.id;
+  console.log(id)
+  const query = { productId:id }; // for order collection and wishList
+  
+  
+  const result = await OrderCollection.findOne(query);
+  if(result){
+
+    res.send(result);
+  }else if(!result){
+
+    const findWishList = await WishListCollection.findOne(query);
+    res.send(findWishList);
+  }
+
+})
+
+
+
+// Integrate stripe payment system
+app.post('/create-payment-intent', async(req, res) =>{
+  
+
+  const price = req.body.price;
+  const amount = price * 100;
+
+  try{
+    const paymentIntent = await stripe.paymentIntents.create({
+    
+      currency:'usd',
+      amount:amount,
+      "payment_method_types": [
+        "card"
+      ],
+    })
+    
+  
+    res.send({
+      clientSecret: paymentIntent.client_secret
+    })
+  
+  }catch(e){
+    console.log(e)
+    return res.status(400).send({message:e.message})
+  }
+
+})
+
+
+// Change orders item payment status from pending to paid
+app.get('/payment/status/:id', async(req, res) =>{
+  const id = req.params.id;
+  const filter = { productId:id }; // for order item and wishList
+  
+  const options = { upsert:true };
+  const updateDoc = {
+    $set:{
+      status:'paid' // change order item status from pending to paid inside orders collection
+    }
+  }
+  
+  const searchOrderItem = await OrderCollection.findOne(filter);
+  
+  if(searchOrderItem){
+  const result = await OrderCollection.updateOne(filter, updateDoc, options);
+    res.send(result);
+  }
+  if(searchOrderItem == null){
+    const searchWishList = await WishListCollection.findOne(filter);
+    if(searchWishList){
+      searchWishList.status = 'paid'
+    }
+    await OrderCollection.insertOne(searchWishList);
+  }
+
+   // Check paid item is on wishList. Then remove it from wishList
+  const deleteWishList = await WishListCollection.findOne(filter);
+  if(deleteWishList){
+    WishListCollection.deleteOne(filter);
+  }
+
+  // ===================== update books collection book status for paid book =============
+  const query = { _id:ObjectId(id) };
+  const searchBooks = await BooksCollection.findOne(query);
+  // console.log(searchBooks)
+  if(searchBooks){
+    const options = { upsert:true };
+    const updateDoc = {
+      $set:{
+        status:'sold'
+      }
+    }
+
+    await BooksCollection.updateOne(query, updateDoc, options);
+  }
+
+  
+})
+
+
+//  ================================== (Stripe Payment system) =================================
 
 
 
