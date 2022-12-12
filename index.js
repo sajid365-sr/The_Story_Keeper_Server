@@ -61,19 +61,12 @@ const run = async () => {
     // Assign JW Token
 
     app.get("/jwt", async (req, res) => {
+
       const email = req.query.email;
-      const state = req.query.state;
+ 
+      const token = jwt.sign({ email }, process.env.JWT, { expiresIn: "1h" });
 
-      const query = { email: email };
-      const user = await UsersCollection.findOne(query);
-
-      if (user || state) {
-        const token = jwt.sign({ email }, process.env.JWT, { expiresIn: "1h" });
-
-        return res.send({ accessToken: token });
-      }
-
-      res.status(403).send({ accessToken: "" });
+      res.send({ accessToken: token });
     });
 
     // Get some category book to display home page
@@ -186,9 +179,15 @@ const run = async () => {
     //  Store User data
     app.post("/users", async (req, res) => {
       const user = req.body.newUser;
-      const result = await UsersCollection.insertOne(user);
+      const email = user.email;
+      const query = { email:email };
+      const findUser = await UsersCollection.findOne(query);
+      if(!findUser){
 
-      res.send(result);
+        const result = await UsersCollection.insertOne(user);
+        res.send(result);
+      }
+
     });
 
     // verify user (Admin/Seller/Buyer)
