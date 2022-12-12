@@ -98,19 +98,16 @@ const run = async () => {
 
     // Get specific category books by Id
     app.get("/category/:id", async (req, res) => {
-      const catId = req.params.id;
-      const query = { categoryId: catId };
+      const catId = parseInt(req.params.id);
+      const query = { categoryId:catId };
       const result = await BooksCollection.find(query).toArray();
-
-      //   const test = require("./books.json");
-      //   const result = test.filter((book) => book.categoryId === catId);
 
       res.send(result);
     });
 
     // Get all books (shop route)
     app.get("/allBooks", async (req, res) => {
-      const query = {};
+      const query = { status:{ $ne: 'sold'}};
       const result = await BooksCollection.find(query).toArray();
 
 
@@ -130,7 +127,7 @@ const run = async () => {
         filteredBooks.push(bookByCatId);
       });
       
-
+      
       res.send(filteredBooks);
     });
 
