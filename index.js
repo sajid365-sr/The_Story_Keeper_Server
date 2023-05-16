@@ -1,13 +1,16 @@
 const express = require("express");
+require("dotenv").config();
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const port = process.env.PORT || 5000;
-require("dotenv").config();
+
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 
+
 const app = express();
+
 
 // Middleware
 app.use(cors());
@@ -32,13 +35,8 @@ const verifyJWT = (req, res, next) =>{
 }
 
 
-
-// Default route
-app.get("/", (req, res) => {
-  res.send("Book Keeper server is running");
-});
-
 // MongoDB connection
+
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.90qadcl.mongodb.net/?retryWrites=true&w=majority`;
 const client = new MongoClient(uri, {
   useNewUrlParser: true,
@@ -69,8 +67,10 @@ const run = async () => {
       res.send({ accessToken: token });
     });
 
+
     // Get some category book to display home page
     app.get("/books", async (req, res) => {
+      console.log('requested');
       const result = await BooksCollection.find({}).toArray();
       //   const result = require("./books.json");
 
@@ -105,7 +105,7 @@ const run = async () => {
       res.send(result);
     });
 
-    // Get all books (shop route)
+    // Get all books (shop route) route
     app.get("/allBooks", async (req, res) => {
       const query = { status:{ $ne: 'sold'}};
       const result = await BooksCollection.find(query).toArray();
@@ -460,7 +460,7 @@ app.get('/payment/:id', async(req, res) =>{
 // Payment from WishList (Buyer wishlist route)
 app.get('/payment2/:id', async(req, res) =>{
   const id = req.params.id;
-  console.log(id)
+  
   const query = { productId:id }; // for order collection and wishList
   
   
@@ -484,6 +484,7 @@ app.post('/create-payment-intent', async(req, res) =>{
 
   const price = req.body.price;
   const amount = price * 100;
+  
 
   try{
     const paymentIntent = await stripe.paymentIntents.create({
@@ -531,7 +532,7 @@ app.get('/payment/status/:id', async(req, res) =>{
     if(searchWishList){
       searchWishList.status = 'paid'
     }
-    await OrderCollection.insertOne(searchWishList);
+     OrderCollection.insertOne(searchWishList);
   }
 
    // Check paid item is on wishList. Then remove it from wishList
@@ -575,6 +576,18 @@ app.post('/payments', async(req, res) =>{
 
   }
 };
+
+
+// Default route
+app.get("/", (req, res) => {
+  res.send("Book Keeper server is running");
+});
+
+// If user request unknown route  that doesn't exists
+// app.all("*", (req, res) => {
+//   res.send("No route found");
+  
+// })
 
 run().catch((err) => console.error(err));
 
