@@ -1,42 +1,35 @@
-const express = require("express");
 require("dotenv").config();
+const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-const port = process.env.PORT || 5000;
-
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
-
+const port = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-
-// Custom middleware to verify jwt
-const verifyJWT = (req, res, next) =>{
-  const authHeader = req.headers.authorization; // Get headers.authorization from req.header to get token inside
-  if(!authHeader){
-    return res.status(401).send( {message:'Unauthorized Access'}); // if no authHeader found then return with a Unauthorized status
+// JWT verification middleware
+const verifyJWT = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: "Unauthorized Access" });
   }
-  const token = authHeader.split(' ')[1]; // split header to get token, because token is with 'bearer token'
 
-  jwt.verify(token, process.env.JWT, function(err, decode){ // verify jwt
-    if(err){ // if gets error during verify then return with a forbidden status
-      return res.status(403).send( {message: 'Forbidden Access'});
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.JWT, (err, decoded) => {
+    if (err) {
+      return res.status(403).send({ message: "Forbidden Access" });
     }
-    req.decoded = decode; // if pass the verification then set decoded msg inside req
-    next(); // call the next function otherwise it won't pass the next function
-  })
-}
+    req.decoded = decoded;
+    next();
+  });
+};
 
-
-// MongoDB connection
-
+// MongoDB connection URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.90qadcl.mongodb.net/?retryWrites=true&w=majority`;
 const client = new MongoClient(uri, {
   useNewUrlParser: true,
@@ -44,554 +37,575 @@ const client = new MongoClient(uri, {
   serverApi: ServerApiVersion.v1,
 });
 
-const run = async () => {
-  
-  // Collections
-  const BooksCollection = client.db("TheStoryKeeper").collection("Books");
-  const OrderCollection = client.db("TheStoryKeeper").collection("Orders");
-  const UsersCollection = client.db("TheStoryKeeper").collection("Users");
-  const AdvertiseItemsCollection = client.db("TheStoryKeeper").collection("AdvertiseItems");
-  const WishListCollection = client.db('TheStoryKeeper').collection('wishList');
-  const PaymentsCollection = client.db("TheStoryKeeper").collection("payments");
-
-
+async function run() {
   try {
-    // Assign JW Token
+    // Connect to MongoDB
+    await client.connect();
+    console.log("✅ Connected to MongoDB Atlas");
 
+    // Collections
+    const db = client.db("TheStoryKeeper");
+    const BooksCollection = db.collection("Books");
+    const OrdersCollection = db.collection("Orders");
+    const UsersCollection = db.collection("Users");
+    const AdvertiseItemsCollection = db.collection("AdvertiseItems");
+    const WishListCollection = db.collection("wishList");
+    const PaymentsCollection = db.collection("payments");
+
+    /**
+     * Auth / JWT
+     */
     app.get("/jwt", async (req, res) => {
-
       const email = req.query.email;
- 
+      if (!email) {
+        return res.status(400).send({ message: "Email query is required" });
+      }
       const token = jwt.sign({ email }, process.env.JWT, { expiresIn: "1h" });
-
       res.send({ accessToken: token });
     });
 
-
-    // Get some category book to display home page
+    /**
+     * Books / Categories
+     */
+    // Get featured categories (up to 2) and their first 4 books
     app.get("/books", async (req, res) => {
-      console.log('requested');
-      const result = await BooksCollection.find({}).toArray();
-      //   const result = require("./books.json");
+      try {
+        const allBooks = await BooksCollection.find({}).toArray();
+        const uniqueCategoryIds = [
+          ...new Set(allBooks.map((book) => book.categoryId)),
+        ].slice(0, 2);
 
-      // Find all category by Category Id
-      const category = [];
-      const categories = result.map((book) => book.categoryId);
-      categories.forEach((id) => {
-        if (!category.includes(id)) {
-          category.push(id);
-        }
-      });
-      const sliceCategory = category.slice(0, 2); // Slice 3 category for display home page
+        const featured = uniqueCategoryIds.map((catId) =>
+          allBooks.filter((book) => book.categoryId === catId).slice(0, 4)
+        );
 
-      // Filter all books by category Id
-      const filteredBooks = [];
-      sliceCategory.forEach((catId) => {
-        const bookByCatId = result.filter((book) => book.categoryId === catId);
-        filteredBooks.push(bookByCatId);
-      });
-
-      const sliceFilteredBook = filteredBooks.slice(0, 4); // Slice only 4 books to display home page
-
-      res.send(sliceFilteredBook);
+        res.send(featured);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch books" });
+      }
     });
 
-    // Get specific category books by Id
-    app.get("/category/:id", async (req, res) => {
-      const catId = parseInt(req.params.id);
-      const query = { categoryId:catId };
-      const result = await BooksCollection.find(query).toArray();
-
-      res.send(result);
-    });
-
-    // Get all books (shop route) route
+    // Get all books organized by category (excluding sold)
     app.get("/allBooks", async (req, res) => {
-      const query = { status:{ $ne: 'sold'}};
-      const result = await BooksCollection.find(query).toArray();
+      try {
+        const availableBooks = await BooksCollection.find({
+          status: { $ne: "sold" },
+        }).toArray();
 
+        const categoryIds = [
+          ...new Set(availableBooks.map((b) => b.categoryId)),
+        ];
+        const grouped = categoryIds.map((catId) =>
+          availableBooks.filter((b) => b.categoryId === catId)
+        );
 
-      // Filter all specific category id
-      const category = [];
-      const categories = result.map((book) => book.categoryId);
-      categories.forEach((id) => {
-        if (!category.includes(id)) {
-          category.push(id);
-        }
-      });
-
-      // Filter all books by category Id
-      const filteredBooks = [];
-      category.forEach((catId) => {
-        const bookByCatId = result.filter((book) => book.categoryId === catId);
-        filteredBooks.push(bookByCatId);
-      });
-      
-      
-      res.send(filteredBooks);
+        res.send(grouped);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch all books" });
+      }
     });
 
-    // Get specific book details by book id
+    // Get books by category ID
+    app.get("/category/:id", async (req, res) => {
+      const catId = parseInt(req.params.id, 10);
+      if (isNaN(catId)) {
+        return res.status(400).send({ message: "Invalid category ID" });
+      }
+      try {
+        const books = await BooksCollection.find({
+          categoryId: catId,
+        }).toArray();
+        res.send(books);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch category books" });
+      }
+    });
+
+    // Get a single book by its ObjectId
     app.get("/book/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: ObjectId(id) };
-      const result = await BooksCollection.findOne(query);
-
-      res.send(result);
+      const { id } = req.params;
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid book ID" });
+      }
+      try {
+        const book = await BooksCollection.findOne({ _id: new ObjectId(id) });
+        res.send(book);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch book" });
+      }
     });
 
-    // Order a book (Buyer booking modal route)
+    // Get all category names
+    app.get("/categories", async (req, res) => {
+      try {
+        const allBooks = await BooksCollection.find({}).toArray();
+        const categories = [...new Set(allBooks.map((book) => book.category))];
+        res.send(categories);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch categories" });
+      }
+    });
+
+    /**
+     * Books (Seller)
+     */
+    // Add a new book
+    app.post("/books", async (req, res) => {
+      const { book } = req.body;
+      if (!book || !book.email || !book.category) {
+        return res.status(400).send({ message: "Book data is incomplete" });
+      }
+
+      try {
+        // Determine or assign categoryId
+        const existingBooks = await BooksCollection.find({}).toArray();
+        const existingCategoryNames = [
+          ...new Set(existingBooks.map((b) => b.category)),
+        ];
+
+        if (existingCategoryNames.includes(book.category)) {
+          const sample = await BooksCollection.findOne({
+            category: book.category,
+          });
+          book.categoryId = sample.categoryId;
+        } else {
+          book.categoryId = existingCategoryNames.length + 1;
+        }
+
+        // Set verified flag based on seller status
+        const seller = await UsersCollection.findOne({ email: book.email });
+        book.verified = seller?.verified || false;
+
+        const result = await BooksCollection.insertOne(book);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to add book" });
+      }
+    });
+
+    // Get seller's products
+    app.get("/myProducts", verifyJWT, async (req, res) => {
+      const email = req.query.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "Forbidden Access" });
+      }
+      try {
+        const products = await BooksCollection.find({ email }).toArray();
+        res.send(products);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch products" });
+      }
+    });
+
+    // Delete a seller's product by ID
+    app.delete("/myProduct/delete/:id", verifyJWT, async (req, res) => {
+      const { id } = req.params;
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid product ID" });
+      }
+
+      try {
+        await BooksCollection.deleteOne({ _id: new ObjectId(id) });
+        await AdvertiseItemsCollection.deleteOne({ _id: id });
+        res.send({ acknowledged: true });
+      } catch (err) {
+        res.status(500).send({ message: "Failed to delete product" });
+      }
+    });
+
+    // Advertise a book
+    app.post("/advertise", async (req, res) => {
+      const { product } = req.body;
+      if (!product || !product._id) {
+        return res.status(400).send({ message: "Product data is required" });
+      }
+
+      try {
+        const bookId = new ObjectId(product._id);
+        await BooksCollection.updateOne(
+          { _id: bookId },
+          { $set: { advertise: true } },
+          { upsert: true }
+        );
+        product.advertise = true;
+        const result = await AdvertiseItemsCollection.insertOne(product);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to advertise product" });
+      }
+    });
+
+    // Get all advertised items
+    app.get("/advertise", verifyJWT, async (req, res) => {
+      try {
+        const ads = await AdvertiseItemsCollection.find({}).toArray();
+        res.send(ads);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch advertised items" });
+      }
+    });
+
+    /**
+     * Orders / Wishlist
+     */
+    // Place an order
     app.post("/orders", async (req, res) => {
       const orderData = req.body.order;
-      const filter = {_id:ObjectId(orderData.productId)};
-      const filter2 = {_id: orderData.productId};
-      const options = {upsert:true};
-      const updateDoc = {
-          $set:{
-              status:'pending'
-          }
+      if (!orderData || !orderData.productId) {
+        return res.status(400).send({ message: "Order data is required" });
       }
-       await BooksCollection.updateOne(filter, updateDoc, options);
-        
 
-      const findAd =  await AdvertiseItemsCollection.findOne(filter2);
-      if(findAd){
-        const updateDoc = {
-          $unset:{
-            advertise:1
-          }
+      try {
+        const bookId = new ObjectId(orderData.productId);
+
+        // Mark the book as pending
+        await BooksCollection.updateOne(
+          { _id: bookId },
+          { $set: { status: "pending" } },
+          { upsert: true }
+        );
+
+        // If it was advertised, remove from advertised items
+        const adItem = await AdvertiseItemsCollection.findOne({
+          _id: orderData.productId,
+        });
+        if (adItem) {
+          await BooksCollection.updateOne(
+            { _id: bookId },
+            { $unset: { advertise: "" } }
+          );
+          await AdvertiseItemsCollection.deleteOne({
+            _id: orderData.productId,
+          });
         }
-        await BooksCollection.updateOne(filter, updateDoc);
-        await AdvertiseItemsCollection.deleteOne(filter2);
-      }     
 
-      const result = await OrderCollection.insertOne(orderData);
-
-      res.send(result);
-    });
-
-
-
-
-    //  Store User data
-    app.post("/users", async (req, res) => {
-      const user = req.body.newUser;
-      const email = user.email;
-      const query = { email:email };
-      const findUser = await UsersCollection.findOne(query);
-      if(!findUser){
-
-        const result = await UsersCollection.insertOne(user);
+        const result = await OrdersCollection.insertOne(orderData);
         res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to place order" });
       }
-
     });
 
-    // verify user (Admin/Seller/Buyer)
-    app.get("/users/type", verifyJWT, async (req, res) => {
-      const email = req.query.email;
-      const decodedEmail = req.decoded.email
-      if(email !== decodedEmail){
-          return res.status(403).send({message: 'Forbidden Access'});
-      }
-
-      const query = { email: email };
-      const result = await UsersCollection.findOne(query);
-      const userType = result.type;
-
-      res.send({ userType });
-    });
-
-    // Get buyer orders (buyer my orders route)
+    // Get buyer's orders
     app.get("/myOrders", verifyJWT, async (req, res) => {
       const email = req.query.email;
-      const decodedEmail = req.decoded.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "Forbidden Access" });
+      }
 
-      if(email !== decodedEmail){
-        return res.status(403).send({message: 'Forbidden Access'});
-    }
-      const query = { email: email };
-      const result = await OrderCollection.find(query).toArray();
-
-      
-      res.send(result);
+      try {
+        const orders = await OrdersCollection.find({ email }).toArray();
+        res.send(orders);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch orders" });
+      }
     });
 
-    // Add a new item to wishlist(Buyer My WishList route)
-    app.post('/wishList', async(req, res) =>{
+    // Add to wishlist
+    app.post("/wishList", async (req, res) => {
       const book = req.body;
-      const result = await WishListCollection.insertOne(book);
+      if (!book || !book.productId) {
+        return res.status(400).send({ message: "Wishlist item is required" });
+      }
 
-      res.send(result);
-    })
-
-    // Get wishList Item (Buyer My WishList route)
-    app.get('/wishList', async(req, res) =>{
-      const email = req.query.email;
-      const query = { email:email };
-      const result = await WishListCollection.find(query).toArray();
-
-      res.send(result);
-    })
-
-    // Get all categories name
-    app.get('/categories', async(req, res) =>{
-      const allBook = await BooksCollection.find({}).toArray();
-
-      const categoryName = allBook.map(book => book.category);
-      const categories = [];
-      
-      categoryName.forEach((catName) => {
-        if (!categories.includes(catName)) {
-          categories.push(catName);
-        }
-        
-      });
-
-      res.send(categories);
-    })
-   
-
-
-    // Add a new product(book) => seller route
-    app.post("/books", async (req, res) => {
-        const allBook = await BooksCollection.find({}).toArray();
-        const book = req.body.book;
-        const filter = { email:book.email };
-        
-        const query = {category : book.category};
-      
-        const categoryName = allBook.map(book => book.category);
-        const filteredBooksByName = [];
-        
-        categoryName.forEach((catName) => {
-          if (!filteredBooksByName.includes(catName)) {
-            filteredBooksByName.push(catName);
-          }
-          
-        });
-
-
-        if(filteredBooksByName.includes(book.category)){
-            const getBook = await BooksCollection.findOne(query);
-            const getId = getBook.categoryId;
-
-            book.categoryId = getId;
-        }
-        else{
-            book.categoryId = filteredBooksByName.length + 1;
-        }
-
-        const findSellerStatus = await UsersCollection.findOne(filter);
-        book.verified = findSellerStatus.verified;
-
-        
-
-      const result = await BooksCollection.insertOne(book);
-      res.send(result);
-
+      try {
+        const result = await WishListCollection.insertOne(book);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to add to wishlist" });
+      }
     });
 
-// Get seller all products (seller myProducts route)
-app.get("/myProducts", verifyJWT, async (req, res) => {
-    const email = req.query.email;
-    const decodedEmail = req.decoded.email
-      if(email !== decodedEmail){
-          return res.status(403).send({message: 'Forbidden Access'});
+    // Get wishlist items by buyer email
+    app.get("/wishList", async (req, res) => {
+      const email = req.query.email;
+      if (!email) {
+        return res.status(400).send({ message: "Email query is required" });
       }
-    const query = { email: email };
-    const result = await BooksCollection.find(query).toArray();
 
-
-    res.send(result);
-  });
-
-
-  // Delete my product (seller my product route)
-app.delete('/myProduct/delete/:id', verifyJWT, async(req,res) =>{
-    const id = req.params.id;
-    const query = { _id:ObjectId(id) };
-    const filter = {_id: id};
-    const result = await BooksCollection.deleteOne(query);
-    
-    const findAd =  await AdvertiseItemsCollection.findOne(filter);
-    if(findAd){
-      await AdvertiseItemsCollection.deleteOne(filter);
-    }   
-    
-    res.send(result);
-})
-
-// Add a new item to Advertise
-app.post('/advertise', async(req,res) =>{
-    const item = req.body.product;
-    item.advertise = true;
-    
-    const filter = {_id:ObjectId(item._id)};
-      const options = {upsert:true};
-      const updateDoc = {
-          $set:{
-              advertise:true
-          }
+      try {
+        const items = await WishListCollection.find({ email }).toArray();
+        res.send(items);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch wishlist" });
       }
-       await BooksCollection.updateOne(filter, updateDoc, options);
+    });
 
-    const result = await AdvertiseItemsCollection.insertOne(item);
-
-    res.send(result);
-})
-
-// Get advertise items
-app.get('/advertise', verifyJWT, async(req,res) =>{
-    const query = {};
-    const result = await AdvertiseItemsCollection.find(query).toArray();
-
-    
-    res.send(result);
-})
-
-// Get all seller (Admin all seller route)
-app.get('/allSeller', verifyJWT, async(req, res) =>{
-  const query = { type:"seller" };
-  const result = await UsersCollection.find(query).toArray();
-
-  res.send(result);
-})
-
-// Delete seller (Admin all seller route)
-app.get('/delete/seller', async(req, res) =>{
-  const email = req.query.email;
-  const query = {email:email};
-  
-  const findBook = await BooksCollection.find(query).toArray(); // Check if the seller has any books on books collection
-  if(findBook){ // If books found then delete them form books collections
-    BooksCollection.deleteMany(query);
-  }
-
-  const orders = await OrderCollection.find({}).toArray();
-
-  orders.forEach(order =>{
-    const filter = { _id:ObjectId(order.productId)}; // filter to search all orders those are available in books collections. If orders not found in books collection that means that book have been removed from book collection. and the ans will be "null". If null found for any order that means that it the orders that should be removed.
-    const result = async() =>{
-      const result2 = await BooksCollection.findOne(filter);
-      if(result2 === null){
-       OrderCollection.deleteOne({productId:order.productId})
+    /**
+     * User management
+     */
+    // Create or store new user
+    app.post("/users", async (req, res) => {
+      const { newUser } = req.body;
+      if (!newUser || !newUser.email) {
+        return res.status(400).send({ message: "User data is required" });
       }
-    }
-   result()
-  })
- 
- const finalResult = await UsersCollection.deleteOne(query);
 
- res.send(finalResult);
-  
- 
-})
+      try {
+        const existing = await UsersCollection.findOne({
+          email: newUser.email,
+        });
+        if (existing) {
+          return res
+            .status(409)
+            .send({ message: "User with that email already exists" });
+        }
 
+        const result = await UsersCollection.insertOne(newUser);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to create user" });
+      }
+    });
 
+    // Get user type (admin / seller / buyer)
+    app.get("/users/type", verifyJWT, async (req, res) => {
+      const email = req.query.email;
+      if (!email || email !== req.decoded.email) {
+        return res.status(403).send({ message: "Forbidden Access" });
+      }
 
-// Get all buyer (Admin all buyer route)
-app.get('/allBuyer', verifyJWT, async(req, res) =>{
-  const query = { type:"buyer" };
-  const result = await UsersCollection.find(query).toArray();
+      try {
+        const user = await UsersCollection.findOne({ email });
+        res.send({ userType: user?.type || "buyer" });
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch user type" });
+      }
+    });
 
-  res.send(result);
-})
+    /**
+     * Admin routes for managing sellers and buyers
+     */
+    // Get all sellers
+    app.get("/allSeller", verifyJWT, async (req, res) => {
+      try {
+        const sellers = await UsersCollection.find({
+          type: "seller",
+        }).toArray();
+        res.send(sellers);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch sellers" });
+      }
+    });
 
-// Delete buyer (Admin all buyer route)
-app.get('/delete/buyer',verifyJWT, async(req,res)=>{
-  const email = req.query.email;
-  const query = {email:email};
+    // Delete a seller by email
+    app.delete("/delete/seller", verifyJWT, async (req, res) => {
+      const email = req.query.email;
+      if (!email) {
+        return res.status(400).send({ message: "Email query is required" });
+      }
 
-  const findBuyerOrder = await OrderCollection.find(query).toArray(); // Check if the buyer has any orders
+      try {
+        // Remove seller's books
+        await BooksCollection.deleteMany({ email });
 
-  if(findBuyerOrder){
-
-    findBuyerOrder.forEach(orders =>{
-      if(orders.status === 'pending'){ // If orders, then check if they are pending or paid, if pending then before delete, change their status from pending to available from book collection ;
-
-        const filter = {_id:ObjectId(orders.productId)}; // check orders
-        const options = { upsert:true };
-        const updateDoc = {
-          $set:{
-            status:'available'
+        // Remove orphaned orders
+        const allOrders = await OrdersCollection.find({}).toArray();
+        for (const order of allOrders) {
+          const bookExists = await BooksCollection.findOne({
+            _id: new ObjectId(order.productId),
+          });
+          if (!bookExists) {
+            await OrdersCollection.deleteOne({ productId: order.productId });
           }
         }
-         BooksCollection.updateOne(filter, updateDoc, options); // updating deleted items status from pending to available inside book collection.
+
+        // Delete the user
+        const result = await UsersCollection.deleteOne({ email });
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to delete seller" });
+      }
+    });
+
+    // Verify a seller
+    app.patch("/seller/verify", verifyJWT, async (req, res) => {
+      const email = req.query.email;
+      if (!email) {
+        return res.status(400).send({ message: "Email query is required" });
       }
 
-    })
-
-    await OrderCollection.deleteMany(query); // Delete buyers unpaid/pending orders
-  }
-  const result = await UsersCollection.deleteOne(query); // Finally delete buyer from users collections.
-
-  res.send(result);
-
-})
-
-// Verify seller (Admin all seller route)
-app.get('/seller/verify',verifyJWT, async(req, res) =>{
-  const email = req.query.email;
-  const filter = { email:email };
-  const options = { upsert:true };
-  const updateDoc = {
-    $set:{
-      verified: true
-    }
-  }
-  const result = await UsersCollection.updateOne(filter, updateDoc, options);
-
-  res.send(result);
-})
-
-
-//  ================================== (Stripe Payment system) =================================
-//(Buyer payment route)
-
-app.get('/payment/:id', async(req, res) =>{
-  const id = req.params.id;
-  const query = { _id:ObjectId(id) };
-  const result = await OrderCollection.findOne(query);
-
-  res.send(result);
-})
-
-// Payment from WishList (Buyer wishlist route)
-app.get('/payment2/:id', async(req, res) =>{
-  const id = req.params.id;
-  
-  const query = { productId:id }; // for order collection and wishList
-  
-  
-  const result = await OrderCollection.findOne(query);
-  if(result){
-
-    res.send(result);
-  }else if(!result){
-
-    const findWishList = await WishListCollection.findOne(query);
-    res.send(findWishList);
-  }
-
-})
-
-
-
-// Integrate stripe payment system
-app.post('/create-payment-intent', async(req, res) =>{
-  
-
-  const price = req.body.price;
-  const amount = price * 100;
-  
-
-  try{
-    const paymentIntent = await stripe.paymentIntents.create({
-    
-      currency:'usd',
-      amount:amount,
-      "payment_method_types": [
-        "card"
-      ],
-    })
-    
-  
-    res.send({
-      clientSecret: paymentIntent.client_secret
-    })
-  
-  }catch(e){
-    console.log(e)
-    return res.status(400).send({message:e.message})
-  }
-
-})
-
-
-// Change orders item payment status from pending to paid
-app.get('/payment/status/:id', async(req, res) =>{
-  const id = req.params.id;
-  const filter = { productId:id }; // for order item and wishList
-  
-  const options = { upsert:true };
-  const updateDoc = {
-    $set:{
-      status:'paid' // change order item status from pending to paid inside orders collection
-    }
-  }
-  
-  const searchOrderItem = await OrderCollection.findOne(filter);
-  
-  if(searchOrderItem){
-  const result = await OrderCollection.updateOne(filter, updateDoc, options);
-    res.send(result);
-  }
-  if(searchOrderItem == null){
-    const searchWishList = await WishListCollection.findOne(filter);
-    if(searchWishList){
-      searchWishList.status = 'paid'
-    }
-     OrderCollection.insertOne(searchWishList);
-  }
-
-   // Check paid item is on wishList. Then remove it from wishList
-  const deleteWishList = await WishListCollection.findOne(filter);
-  if(deleteWishList){
-    WishListCollection.deleteOne(filter);
-  }
-
-  // ===================== update books collection book status for paid book =============
-  const query = { _id:ObjectId(id) };
-  const searchBooks = await BooksCollection.findOne(query);
-  // console.log(searchBooks)
-  if(searchBooks){
-    const options = { upsert:true };
-    const updateDoc = {
-      $set:{
-        status:'sold'
+      try {
+        const result = await UsersCollection.updateOne(
+          { email },
+          { $set: { verified: true } },
+          { upsert: true }
+        );
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to verify seller" });
       }
-    }
+    });
 
-    await BooksCollection.updateOne(query, updateDoc, options);
+    // Get all buyers
+    app.get("/allBuyer", verifyJWT, async (req, res) => {
+      try {
+        const buyers = await UsersCollection.find({ type: "buyer" }).toArray();
+        res.send(buyers);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch buyers" });
+      }
+    });
+
+    // Delete a buyer by email
+    app.delete("/delete/buyer", verifyJWT, async (req, res) => {
+      const email = req.query.email;
+      if (!email) {
+        return res.status(400).send({ message: "Email query is required" });
+      }
+
+      try {
+        // Restore book statuses for pending orders
+        const buyerOrders = await OrdersCollection.find({ email }).toArray();
+        for (const order of buyerOrders) {
+          if (order.status === "pending") {
+            await BooksCollection.updateOne(
+              { _id: new ObjectId(order.productId) },
+              { $set: { status: "available" } },
+              { upsert: true }
+            );
+          }
+        }
+        // Delete buyer's orders
+        await OrdersCollection.deleteMany({ email });
+
+        // Delete the user
+        const result = await UsersCollection.deleteOne({ email });
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to delete buyer" });
+      }
+    });
+
+    /**
+     * Payments / Stripe
+     */
+    // Get order info for payment by order ID
+    app.get("/payment/:id", async (req, res) => {
+      const { id } = req.params;
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid order ID" });
+      }
+      try {
+        const order = await OrdersCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        res.send(order);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch payment info" });
+      }
+    });
+
+    // Get order or wishlist item by product ID for payment
+    app.get("/payment2/:id", async (req, res) => {
+      const { id } = req.params;
+      try {
+        const order = await OrdersCollection.findOne({ productId: id });
+        if (order) {
+          return res.send(order);
+        }
+        const wishItem = await WishListCollection.findOne({ productId: id });
+        res.send(wishItem);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch payment2 info" });
+      }
+    });
+
+    // Create Stripe payment intent
+    app.post("/create-payment-intent", async (req, res) => {
+      const { price } = req.body;
+      if (typeof price !== "number") {
+        return res.status(400).send({ message: "Price must be a number" });
+      }
+      const amount = Math.round(price * 100);
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          currency: "usd",
+          amount,
+          payment_method_types: ["card"],
+        });
+        res.send({ clientSecret: paymentIntent.client_secret });
+      } catch (err) {
+        res.status(400).send({ message: err.message });
+      }
+    });
+
+    // Update payment status from pending to paid
+    app.patch("/payment/status/:id", async (req, res) => {
+      const { id } = req.params;
+      try {
+        // First check if it's an order
+        const order = await OrdersCollection.findOne({ productId: id });
+        if (order) {
+          await OrdersCollection.updateOne(
+            { productId: id },
+            { $set: { status: "paid" } },
+            { upsert: true }
+          );
+          // Update book status to sold
+          await BooksCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { status: "sold" } },
+            { upsert: true }
+          );
+          // If in wishlist, remove it
+          await WishListCollection.deleteOne({ productId: id });
+          return res.send({ acknowledged: true });
+        }
+
+        // Otherwise, check in wishlist
+        const wishItem = await WishListCollection.findOne({ productId: id });
+        if (wishItem) {
+          wishItem.status = "paid";
+          await OrdersCollection.insertOne(wishItem);
+          await WishListCollection.deleteOne({ productId: id });
+          // Update book status
+          await BooksCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { status: "sold" } },
+            { upsert: true }
+          );
+          return res.send({ acknowledged: true });
+        }
+
+        res.status(404).send({ message: "No order or wishlist item found" });
+      } catch (err) {
+        res.status(500).send({ message: "Failed to update payment status" });
+      }
+    });
+
+    // Store payment record
+    app.post("/payments", async (req, res) => {
+      const payment = req.body;
+      if (!payment || !payment.paymentIntentId) {
+        return res.status(400).send({ message: "Payment data is required" });
+      }
+      try {
+        const result = await PaymentsCollection.insertOne(payment);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to save payment" });
+      }
+    });
+  } catch (err) {
+    console.error("❌ MongoDB connection error:", err);
+    process.exit(1);
   }
+}
 
-  
-})
-
-// Save payment data to db
-app.post('/payments', async(req, res) =>{
-  const payment = req.body;
-  const result = await PaymentsCollection.insertOne(payment);
-
-  res.send(result);
-})
-
-
-//  ================================== (Stripe Payment system) =================================
-
-
-
-  } catch {
-
-  }
-};
-
+run();
 
 // Default route
 app.get("/", (req, res) => {
   res.send("Book Keeper server is running");
 });
 
-// If user request unknown route  that doesn't exists
-// app.all("*", (req, res) => {
-//   res.send("No route found");
-  
-// })
+// 404 handler for unknown routes
+app.use((req, res) => {
+  res.status(404).send({ message: "No route found" });
+});
 
-run().catch((err) => console.error(err));
-
-// Listen
+// Start the server
 app.listen(port, () => {
-  console.log(`Book Keeper server is running on port: ${port}`);
+  console.log(`📚 Book Keeper server is running on port: ${port}`);
 });
